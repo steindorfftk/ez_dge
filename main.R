@@ -34,11 +34,16 @@ for (i in seq_along(cond2_files)) {
 #02.2 - Create data frame
 all_vars <- ls() #List all variables
 cond_vars <- grep("^cond_", all_vars, value = TRUE) #Filter desired data variables names
-cond_data <- mget(cond_vars)
-pre_data_frame_a <- do.call(cbind, cond_data)
-pre_data_frame_b <- pre_data_frame_a[, seq(2, ncol(pre_data_frame_a), by = 2)]
-geneCounts <- as.data.frame(pre_data_frame_b)
-row.names(geneCounts) <- cond_1_1[,1]
+cond_data <- mget(cond_vars) #Gets data for each file
+pre_data_frame_a <- do.call(cbind, cond_data) #Combines data in a data frame
+pre_data_frame_b <- pre_data_frame_a[, seq(2, ncol(pre_data_frame_a), by = 2)] #Filters just the second column of the data frame
+geneCounts <- as.data.frame(pre_data_frame_b) #Saves all as the geneCounts data frame
+row.names(geneCounts) <- cond_1_1[,1] #Recovers row names
+oldcolnames <- colnames(geneCounts) #Saves old col names in a vector
+newcolnames <- sub("\\..*", "", oldcolnames) #Modifies col names to a cleaner version
+colnames(geneCounts) <- newcolnames #Assign new col names
+sizeGeneCounts <- dim(geneCounts)
+geneCounts <- geneCounts[1:(sizeGeneCounts[1]-5),]
 
 
 
