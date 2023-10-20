@@ -19,18 +19,26 @@ cond2_files <- list.files(cond2_dir, pattern = "\\.tabular$", full.names = TRUE)
 all_files <- c(cond1_files, cond2_files) #Combine sets of files
 DG <- readDGE(all_files, header=T) #Run readDGE
 
-#02 - Load files
+#02 - Create data frame
+#02.1 - Load files
 # Load files for cond1
-cond1_files <- list.files('input/cond1', pattern = "\\.tabular$", full.names = TRUE)
 for (i in seq_along(cond1_files)) {
   assign(paste0("cond_1_", i), read.table(cond1_files[i], sep = '\t', header = TRUE))
 }
 
 # Load files for cond2
-cond2_files <- list.files('input/cond2', pattern = "\\.tabular$", full.names = TRUE)
 for (i in seq_along(cond2_files)) {
   assign(paste0("cond_2_", i), read.table(cond2_files[i], sep = '\t', header = TRUE))
 }
+
+#02.2 - Create data frame
+all_vars <- ls() #List all variables
+cond_vars <- grep("^cond_", all_vars, value = TRUE) #Filter desired data variables names
+cond_data <- mget(cond_vars)
+pre_data_frame_a <- do.call(cbind, cond_data)
+pre_data_frame_b <- pre_data_frame_a[, seq(2, ncol(pre_data_frame_a), by = 2)]
+geneCounts <- as.data.frame(pre_data_frame_b)
+row.names(geneCounts) <- cond_1_1[,1]
 
 
 
