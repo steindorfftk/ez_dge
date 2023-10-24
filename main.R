@@ -166,7 +166,8 @@ res.caseVSctr<-topTags(lrt.caseVSctr, n=60000, sort.by = "p.value") #Extracts th
 table.caseVSctr <- as.data.frame(res.caseVSctr$table) #Create new data frame for results
 table.caseVSctr$ENTREZID <- row.names(table.caseVSctr) #Add new column "ENTREZID" to data frame
 table.caseVSctr <- merge(table.caseVSctr,genes.map) #Add gene symbols to data frame
-write.csv(table.caseVSctr, file="output/dea_results/Results.csv") #Saves results as "Results.csv" in the output dea_results directory
+csvname <- paste0("output/dea_results/",study_name,"_results.csv")
+write.csv(table.caseVSctr, file=csvname) #Saves results as "Results.csv" in the output dea_results directory
 
 
 
