@@ -1,7 +1,7 @@
 #Definitions
 study_name <- "example"
 condition_1 <- "Controls"
-condition_2 <- "MPS (example)"
+condition_2 <- "Treated"
 organism <- "Mus musculus" #Homo sapiens or Mus musculus
 
 #Set working directory
@@ -13,8 +13,6 @@ setwd("~/Desktop/Coding/deaR")
 #	install.packages("BiocManager")
 #BiocManager::install("edgeR")
 library("edgeR")
-# BiocManager::install("org.Hs.eg.db")
-#library("org.Hs.eg.db")
 
 #01 - readDGE
 cond1_dir <- "input/cond1" #Set condition 1 directory path
