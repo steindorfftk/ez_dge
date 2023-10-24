@@ -1,6 +1,8 @@
 #Definitions
-study_name = "example"
-organism = "Mus musculus" #Homo sapiens or Mus musculus
+study_name <- "example"
+condition_1 <- "Controls"
+condition_2 <- "MPS (example)"
+organism <- "Mus musculus" #Homo sapiens or Mus musculus
 
 #Set working directory
 setwd("~/Desktop/Coding/deaR")
@@ -26,12 +28,12 @@ DG <- readDGE(all_files, header=T) #Run readDGE
 #02.1 - Load files
 # Load files for cond1
 for (i in seq_along(cond1_files)) {
-  assign(paste0("cond_1_", i), read.table(cond1_files[i], sep = '\t', header = FALSE))
+  assign(paste0("cond_1_", i), read.table(cond1_files[i], sep = '\t', header = TRUE))
 }
 
 # Load files for cond2
 for (i in seq_along(cond2_files)) {
-  assign(paste0("cond_2_", i), read.table(cond2_files[i], sep = '\t', header = FALSE))
+  assign(paste0("cond_2_", i), read.table(cond2_files[i], sep = '\t', header = TRUE))
 }
 
 #02.2 - Create data frame
@@ -66,7 +68,6 @@ colnames(design) <- gsub("condition","",colnames(design)) #Rename design matrix 
 
 #05 TMM Normalization
 dge <- calcNormFactors(dge) #Calculate normalization factors
-plotMDS(dge) #Plots normalization factors
 norm_counts <- cpm(dge,log = TRUE, prior.count = 3) #Adds 3 units to each count, calculates counts per million and transform into log.
 exp <- as.data.frame(norm_counts) #Saves cpm as data frame
 plotNameA <- paste0("output/plots/01_", study_name , "_MDSplot.jpeg" ) #Defines first plot name
@@ -78,13 +79,12 @@ dev.off() #Clears plot panel
 disp <- estimateGLMCommonDisp(dge, design) #Estimate commom dispersion
 disp <- estimateGLMTrendedDisp(disp, design) #Estimate trended dispersion
 disp <- estimateGLMTagwiseDisp(disp, design) #Estimate tagwise dispersion
-plotBCV(disp) #Plot dispersions
 plotNameB <- paste0("output/plots/02_", study_name , "_Dispersion_BCVplot.jpeg" ) #Defines second plot name
 jpeg(file=plotNameB, width=5000, height=5000, units="px", res=300) #Defines second plot specs
 plotBCV(disp) #Saves second plot as jpeg
 dev.off() #Clears plot panel
 
-#07 SVA Normalization
+#07.1 SVA Normalization
 # BiocManager::install("sva")
 library("sva")
 design0 <- as.data.frame(design) #Create a second design data frame for SVA
@@ -100,10 +100,75 @@ cleaningP <- function(y, design, svaobj,  P=ncol(design)) {
   return(cleany)
 } #Defines function for removing latent variation factors as described in GitHub:https://bmcbioinformatics.biomedcentral.com/articles/10.1186/s12859-015-0808-5
 cleanp <- cleaningP(norm_counts,design,svobj) #Removes latent variation factors from data
-pca <- prcomp(t(cleanp)) #Calculates principal components for the new data frame
-plot(pca) #Plots the PCA
-plotNameC <- paste0("output/plots/03_", study_name , "_PCA_after_SVA.jpeg" ) #Defines third plot name
+
+#07.2 Plot PCA variances
+pca0 <- prcomp(t(norm_counts)) #Calculates principal components for the old data frame
+plotNameC <- paste0("output/plots/03_", study_name , "_PCA_before_SVA.jpeg" ) #Defines third plot name
 jpeg(file=plotNameC, width=5000, height=5000, units="px", res=300) #Defines third plot specs
-plot(pca) #Saves third plot
+plot(pca0) #Saves third plot
 dev.off() #Clears plot panel
+plotNameD <- paste0("output/plots/04_", study_name , "_PCA_after_SVA.jpeg" ) #Defines fourth plot name
+pca <- prcomp(t(cleanp))
+jpeg(file=plotNameD, width=5000, height=5000, units="px", res=300) #Defines fourth plot specs
+plot(pca) #Saves fourth plot
+graphics.off() #Clears plot panel
+
+#07.3 Plot samples PCA
+sv.p3Ascores <- pca$x #Saves PCA scores for each sample
+plotcolors <- c(rep('blue', numCtr), rep('red', numCase)) #Saves color scheme for this analysis' PCA
+plot(sv.p3Ascores[,1], sv.p3Ascores[,2], xlab="PCA 1", ylab="PCA 2",
+     type="p", cex.lab=0.75, cex.axis=0.75, 
+     #xlim=c(-200,250), ylim=c(-200,170),
+     col=plotcolors,
+     main="PCA scores", cex.main=1.2, font.main=1,pch=15) #Plots PCA
+text(sv.p3Ascores, colnames(sampleNames), cex=0.5, pos=4, col="black") #Adds sample numbers
+legend("bottomright", legend=c(condition_1,condition_2),
+       bty="n", xjust = 1, yjust = 1,
+       cex=.75, y.intersp=1, col=c('blue', 'red'), pch=20) #Adds legends
+plotNameE <- paste0("output/plots/05_", study_name , "_PCA_scores.jpeg" ) #Defines fifth plot name
+jpeg(file=plotNameE, width=3200, height=3200, units="px", res=300) #Defines fifth plot specs
+plot(sv.p3Ascores[,1], sv.p3Ascores[,2], xlab="PCA 1", ylab="PCA 2",
+     type="p", cex.lab=0.75, cex.axis=0.75, 
+     #xlim=c(-200,250), ylim=c(-200,170),
+     col=plotcolors,
+     main="PCA scores", cex.main=1.2, font.main=1,pch=15) #Adds PCA data to jpeg
+text(sv.p3Ascores, colnames(sampleNames), cex=0.5, pos=4, col="black") #Adds sample numbers to jpeg
+legend("bottomright", legend=c(condition_1,condition_2),
+       bty="n", xjust = 1, yjust = 1,
+       cex=.75, y.intersp=1, col=c('blue', 'red'), pch=20) #Adds legend to jpeg
+dev.off() #Saves jpeg
+dev.off() #Clears plot panel
+
+#08 Differential gene expression analysis 
+#08.1 Create contrast
+modSv <- cbind(design,svobj.df) #Combines design and latent variation 
+fit <- glmFit(disp, modSv) #Fits the generalized linear model to the variation
+lrt <- glmLRT(fit) #Tests the likelihood ratio of the fit model
+topTags(lrt) #Prints the LRT results
+caseVSctr <- makeContrasts(case-ctr, levels=modSv)
+
+#08.2 Replace gene ids for gene symbols
+if (organism == "Homo sapiens") {
+  #BiocManager::install("org.Hs.eg.db")
+  library(org.Hs.eg.db)
+  genes.map <- select(org.Hs.eg.db, 
+                      as.character(cond_1_1[,1]),c("SYMBOL","ENTREZID"), "ENTREZID")
+} else if (organism == "Mus musculus") {
+  #BiocManager::install("org.Mm.eg.db")
+  library(org.Mm.eg.db)
+  genes.map <- select(org.Mm.eg.db, 
+                      as.character(cond_1_1[,1]),c("SYMBOL","ENTREZID"), "ENTREZID")
+}
+
+#08.3 Differential gene expression analysis per se
+lrt.caseVSctr <- glmLRT(fit, contrast=caseVSctr) #Runs differential gene expression analysis
+res.caseVSctr<-topTags(lrt.caseVSctr, n=60000, sort.by = "p.value") #Extracts the top 60k results
+
+#08.4 Save differential gene expression results
+table.caseVSctr <- as.data.frame(res.caseVSctr$table) #Create new data frame for results
+table.caseVSctr$ENTREZID <- row.names(table.caseVSctr) #Add new column "ENTREZID" to data frame
+table.caseVSctr <- merge(table.caseVSctr,genes.map) #Add gene symbols to data frame
+write.csv(table.caseVSctr, file="output/dea_results/Results.csv") #Saves results as "Results.csv" in the output dea_results directory
+
+
 
