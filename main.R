@@ -1,5 +1,10 @@
+#Definitions
+study_name = "example"
+organism = "Mus musculus" #Homo sapiens or Mus musculus
+
 #Set working directory
 setwd("~/Desktop/Coding/deaR")
+
 
 #Install and load required libraries
 #if (!require("BiocManager", quietly = TRUE))
@@ -45,5 +50,28 @@ colnames(geneCounts) <- newcolnames #Assign new col names
 sizeGeneCounts <- dim(geneCounts)
 geneCounts <- geneCounts[1:(sizeGeneCounts[1]-5),]
 
-View(geneCounts)
+#03 Rename the columns and set conditions
+colNames <- colnames(geneCounts) #Saves the col names
+colNames <- gsub('cond_1_', 'ctr', colNames) #Changes 'cond_1_' for 'ctr' in col names
+colNames <- gsub('cond_2_', 'case', colNames) #Changes 'cond_2_' for 'case' in col names
+colnames(geneCounts) <- colNames #Applies new col names for geneCounts
+numCtr <- sum(grepl('ctr', colNames)) #Counts the number of controls
+numCase <- sum(grepl('case', colNames)) #Counts the number of cases
+condition <- c(rep('ctr', numCtr), rep('case', numCase)) #Sets conditions vector
+sampleNames <- colNames #Saves sample names in a vector
+
+
+#04 Construct Linear Generalized Model 
+dge <- DGEList(counts=geneCounts, group=condition) #Create DGEList
+design <- model.matrix(~condition+0, data=dge$samples) #Create design matrix
+colnames(design) <- gsub("condition","",colnames(design)) #Rename design matrix col names
+
+#05 TMM Normalization
+dge <- calcNormFactors(dge) #Calculate normalization factors
+plotMDS(dge) #Plots normalization factors
+norm_counts <- cpm(dge,log = TRUE, prior.count = 3) #Adds 3 units to each count, calculates counts per million and transform into log.
+exp <- as.data.frame(norm_counts) #Saves cpm as data frame
+plotNameA <- paste0("output/plot/01_", study_name , "_MDSplot.jpeg" )
+jpeg(file=plotNameA, width=5000, height=5000, units="px", res=300)
+View(exp)
 
