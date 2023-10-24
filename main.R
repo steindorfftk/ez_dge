@@ -23,12 +23,12 @@ DG <- readDGE(all_files, header=T) #Run readDGE
 #02.1 - Load files
 # Load files for cond1
 for (i in seq_along(cond1_files)) {
-  assign(paste0("cond_1_", i), read.table(cond1_files[i], sep = '\t', header = TRUE))
+  assign(paste0("cond_1_", i), read.table(cond1_files[i], sep = '\t', header = FALSE))
 }
 
 # Load files for cond2
 for (i in seq_along(cond2_files)) {
-  assign(paste0("cond_2_", i), read.table(cond2_files[i], sep = '\t', header = TRUE))
+  assign(paste0("cond_2_", i), read.table(cond2_files[i], sep = '\t', header = FALSE))
 }
 
 #02.2 - Create data frame
@@ -45,5 +45,5 @@ colnames(geneCounts) <- newcolnames #Assign new col names
 sizeGeneCounts <- dim(geneCounts)
 geneCounts <- geneCounts[1:(sizeGeneCounts[1]-5),]
 
-
+View(geneCounts)
 
