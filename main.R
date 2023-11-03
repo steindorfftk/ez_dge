@@ -3,9 +3,10 @@ study_name <- "example"
 condition_1 <- "Controls"
 condition_2 <- "Treated"
 organism <- "Mus musculus" #Homo sapiens or Mus musculus
+cutoffmode <- "FDR" #PValue or FDR
 
 #Set working directory
-setwd("~/Desktop/Coding/deaR")
+#setwd("~/Desktop/Coding/deaR")
 
 
 #Install and load required libraries
@@ -166,8 +167,23 @@ res.caseVSctr<-topTags(lrt.caseVSctr, n=60000, sort.by = "p.value") #Extracts th
 table.caseVSctr <- as.data.frame(res.caseVSctr$table) #Create new data frame for results
 table.caseVSctr$ENTREZID <- row.names(table.caseVSctr) #Add new column "ENTREZID" to data frame
 table.caseVSctr <- merge(table.caseVSctr,genes.map) #Add gene symbols to data frame
-csvname <- paste0("output/dea_results/",study_name,"_results.csv")
-write.csv(table.caseVSctr, file=csvname) #Saves results as "Results.csv" in the output dea_results directory
+csvname <- paste0("output/dea_results/",study_name,"_raw.csv") #Set raw file name
+write.csv(table.caseVSctr, file=csvname) #Saves raw results as .csv in the output dea_results directory
+tableB.caseVSctr <- table.caseVSctr[complete.cases(table.caseVSctr$SYMBOL), ] #Remove rows without gene symbol
+if (cutoffmode == "PValue") {
+  tableB.caseVSctr <- tableB.caseVSctr[tableB.caseVSctr$PValue <= 0.05, ]
+} else if (cutoffmode == "FDR") {
+  tableB.caseVSctr <- tableB.caseVSctr[tableB.caseVSctr$FDR <= 0.05, ]
+} #Remove rows according to Pvalue or FDR
+tableC.caseVSctr <- tableB.caseVSctr[tableB.caseVSctr$logFC <= -1|tableB.caseVSctr$logFC >= 1, ] #Save genes using logFC 1 as cut-off
+tableD.caseVSctr <- tableB.caseVSctr[tableB.caseVSctr$logFC <= -1.5|tableB.caseVSctr$logFC >= 1.5, ] #Save genes using logFC 1.5 as cut-off
+tableE.caseVSctr <- tableB.caseVSctr[tableB.caseVSctr$logFC <= -2|tableB.caseVSctr$logFC >= 2, ] #Save genes using logFC 2 as cut-off
+csvnamelog1 <- paste0("output/dea_results/",study_name,"_logFC_1.csv") #Save logFC 1 table name
+csvnamelog15 <- paste0("output/dea_results/",study_name,"_logFC_1_5.csv") #Save logFC 1.5 table name
+csvnamelog2 <- paste0("output/dea_results/",study_name,"_logFC_2.csv") #Save logFC 2 table name
+write.csv(tableC.caseVSctr, file=csvnamelog1) #Saves logFC 1 results as .csv in the output dea_results directory
+write.csv(tableD.caseVSctr, file=csvnamelog15) #Saves logFC 1.5 results as .csv in the output dea_results directory
+write.csv(tableE.caseVSctr, file=csvnamelog2) #Saves logFC 2 results as .csv in the output dea_results directory
 
 
 
