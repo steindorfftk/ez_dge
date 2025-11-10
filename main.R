@@ -1,189 +1,158 @@
-#Definitions
+## === User parameters ===
 study_name <- "example"
 condition_1 <- "Controls"
 condition_2 <- "Treated"
-organism <- "Mus musculus" #Homo sapiens or Mus musculus
-cutoffmode <- "FDR" #PValue or FDR
+organism <- "Homo sapiens" # "Homo sapiens" or "Mus musculus"
+input_pattern <- "\\.tabular$"
+cond1_dir <- "input/cond1"
+cond2_dir <- "input/cond2"
+outdir <- "output"
 
-#Set working directory
-#setwd("~/Desktop/Coding/deaR")
+# Optional: specify additional covariates file (CSV with samples as rows)
+covariates_file <- NULL  # e.g., "metadata/covariates.csv" or NULL if none
 
+# Create output directories
+if (!dir.exists(outdir)) dir.create(outdir, recursive = TRUE)
+if (!dir.exists(file.path(outdir, "plots"))) dir.create(file.path(outdir, "plots"), recursive = TRUE)
+if (!dir.exists(file.path(outdir, "dea_results"))) dir.create(file.path(outdir, "dea_results"), recursive = TRUE)
 
-#Install and load required libraries
-#if (!require("BiocManager", quietly = TRUE))
-#	install.packages("BiocManager")
-#BiocManager::install("edgeR")
-library("edgeR")
+set.seed(123)
 
-#01 - readDGE
-cond1_dir <- "input/cond1" #Set condition 1 directory path
-cond2_dir <- "input/cond2" #Set condition 2 directory path
-cond1_files <- list.files(cond1_dir, pattern = "\\.tabular$", full.names = TRUE) #Save cond1 files
-cond2_files <- list.files(cond2_dir, pattern = "\\.tabular$", full.names = TRUE) #Save cond2 files
-all_files <- c(cond1_files, cond2_files) #Combine sets of files
-DG <- readDGE(all_files, header=T) #Run readDGE
-
-#02 - Create data frame
-#02.1 - Load files
-# Load files for cond1
-for (i in seq_along(cond1_files)) {
-  assign(paste0("cond_1_", i), read.table(cond1_files[i], sep = '\t', header = TRUE))
+## === Packages ===
+pkgs <- c("edgeR", "limma", "sva", "AnnotationDbi", "org.Mm.eg.db", "org.Hs.eg.db", "ggplot2")
+for (p in pkgs) {
+  if (!suppressWarnings(requireNamespace(p, quietly = TRUE))) {
+    message("Package '", p, "' not installed. Please install before running the pipeline.")
+  }
 }
+library(edgeR)
+library(limma)
+library(sva)
+library(AnnotationDbi)
+library(ggplot2)
 
-# Load files for cond2
-for (i in seq_along(cond2_files)) {
-  assign(paste0("cond_2_", i), read.table(cond2_files[i], sep = '\t', header = TRUE))
-}
-
-#02.2 - Create data frame
-all_vars <- ls() #List all variables
-cond_vars <- grep("^cond_", all_vars, value = TRUE) #Filter desired data variables names
-cond_data <- mget(cond_vars) #Gets data for each file
-pre_data_frame_a <- do.call(cbind, cond_data) #Combines data in a data frame
-pre_data_frame_b <- pre_data_frame_a[, seq(2, ncol(pre_data_frame_a), by = 2)] #Filters just the second column of the data frame
-geneCounts <- as.data.frame(pre_data_frame_b) #Saves all as geneCounts data frame
-row.names(geneCounts) <- cond_1_1[,1] #Recovers row names
-oldcolnames <- colnames(geneCounts) #Saves old col names in a vector
-newcolnames <- sub("\\..*", "", oldcolnames) #Modifies col names to a cleaner version
-colnames(geneCounts) <- newcolnames #Assign new col names
-sizeGeneCounts <- dim(geneCounts)
-geneCounts <- geneCounts[1:(sizeGeneCounts[1]-5),]
-
-#03 Rename the columns and set conditions
-colNames <- colnames(geneCounts) #Saves the col names
-colNames <- gsub('cond_1_', 'ctr', colNames) #Changes 'cond_1_' for 'ctr' in col names
-colNames <- gsub('cond_2_', 'case', colNames) #Changes 'cond_2_' for 'case' in col names
-colnames(geneCounts) <- colNames #Applies new col names for geneCounts
-numCtr <- sum(grepl('ctr', colNames)) #Counts the number of controls
-numCase <- sum(grepl('case', colNames)) #Counts the number of cases
-condition <- c(rep('ctr', numCtr), rep('case', numCase)) #Sets conditions vector
-sampleNames <- colNames #Saves sample names in a vector
-
-
-#04 Construct Linear Generalized Model 
-dge <- DGEList(counts=geneCounts, group=condition) #Create DGEList
-design <- model.matrix(~condition+0, data=dge$samples) #Create design matrix
-colnames(design) <- gsub("condition","",colnames(design)) #Rename design matrix col names
-
-#05 TMM Normalization
-dge <- calcNormFactors(dge) #Calculate normalization factors
-norm_counts <- cpm(dge,log = TRUE, prior.count = 3) #Adds 3 units to each count, calculates counts per million and transform into log.
-exp <- as.data.frame(norm_counts) #Saves cpm as data frame
-plotNameA <- paste0("output/plots/01_", study_name , "_MDSplot.jpeg" ) #Defines first plot name
-jpeg(file=plotNameA, width=5000, height=5000, units="px", res=300) #Defines first plot specs
-plotMDS(dge) #Saves first plot as jpeg
-dev.off() #Clears plot panel
-
-#06 Dispersion estimation and plotting
-disp <- estimateGLMCommonDisp(dge, design) #Estimate commom dispersion
-disp <- estimateGLMTrendedDisp(disp, design) #Estimate trended dispersion
-disp <- estimateGLMTagwiseDisp(disp, design) #Estimate tagwise dispersion
-plotNameB <- paste0("output/plots/02_", study_name , "_Dispersion_BCVplot.jpeg" ) #Defines second plot name
-jpeg(file=plotNameB, width=5000, height=5000, units="px", res=300) #Defines second plot specs
-plotBCV(disp) #Saves second plot as jpeg
-dev.off() #Clears plot panel
-
-#07.1 SVA Normalization
-# BiocManager::install("sva")
-library("sva")
-design0 <- as.data.frame(design) #Create a second design data frame for SVA
-design0 <- model.matrix(~1, data=design0) #Assigns 1 for all conditions in the new data frame 
-n.sv <- num.sv(norm_counts,design,method="leek") #Estimate number of latent factors
-svobj <- sva(norm_counts,design,design0,n.sv=n.sv) #Identify latent variation factors
-svobj.df <- data.frame(svobj$sv) #Saves identified latent factors as data frame
-cleaningP <- function(y, design, svaobj,  P=ncol(design)) {
-  X=cbind(design,svaobj$sv)
-  Hat=solve(t(X)%*%X)%*%t(X)
-  beta=(Hat%*%t(y))
-  cleany=y-t(as.matrix(X[,-c(1:P)])%*%beta[-c(1:P),])
-  return(cleany)
-} #Defines function for removing latent variation factors as described in GitHub:https://bmcbioinformatics.biomedcentral.com/articles/10.1186/s12859-015-0808-5
-cleanp <- cleaningP(norm_counts,design,svobj) #Removes latent variation factors from data
-
-#07.2 Plot PCA variances
-pca0 <- prcomp(t(norm_counts)) #Calculates principal components for the old data frame
-plotNameC <- paste0("output/plots/03_", study_name , "_PCA_before_SVA.jpeg" ) #Defines third plot name
-jpeg(file=plotNameC, width=5000, height=5000, units="px", res=300) #Defines third plot specs
-plot(pca0) #Saves third plot
-dev.off() #Clears plot panel
-plotNameD <- paste0("output/plots/04_", study_name , "_PCA_after_SVA.jpeg" ) #Defines fourth plot name
-pca <- prcomp(t(cleanp))
-jpeg(file=plotNameD, width=5000, height=5000, units="px", res=300) #Defines fourth plot specs
-plot(pca) #Saves fourth plot
-graphics.off() #Clears plot panel
-
-#07.3 Plot samples PCA
-sv.p3Ascores <- pca$x #Saves PCA scores for each sample
-plotcolors <- c(rep('blue', numCtr), rep('red', numCase)) #Saves color scheme for this analysis' PCA
-plot(sv.p3Ascores[,1], sv.p3Ascores[,2], xlab="PCA 1", ylab="PCA 2",
-     type="p", cex.lab=0.75, cex.axis=0.75, 
-     #xlim=c(-200,250), ylim=c(-200,170),
-     col=plotcolors,
-     main="PCA scores", cex.main=1.2, font.main=1,pch=15) #Plots PCA
-text(sv.p3Ascores, colnames(sampleNames), cex=0.5, pos=4, col="black") #Adds sample numbers
-legend("bottomright", legend=c(condition_1,condition_2),
-       bty="n", xjust = 1, yjust = 1,
-       cex=.75, y.intersp=1, col=c('blue', 'red'), pch=20) #Adds legends
-plotNameE <- paste0("output/plots/05_", study_name , "_PCA_scores.jpeg" ) #Defines fifth plot name
-jpeg(file=plotNameE, width=3200, height=3200, units="px", res=300) #Defines fifth plot specs
-plot(sv.p3Ascores[,1], sv.p3Ascores[,2], xlab="PCA 1", ylab="PCA 2",
-     type="p", cex.lab=0.75, cex.axis=0.75, 
-     #xlim=c(-200,250), ylim=c(-200,170),
-     col=plotcolors,
-     main="PCA scores", cex.main=1.2, font.main=1,pch=15) #Adds PCA data to jpeg
-text(sv.p3Ascores, colnames(sampleNames), cex=0.5, pos=4, col="black") #Adds sample numbers to jpeg
-legend("bottomright", legend=c(condition_1,condition_2),
-       bty="n", xjust = 1, yjust = 1,
-       cex=.75, y.intersp=1, col=c('blue', 'red'), pch=20) #Adds legend to jpeg
-dev.off() #Saves jpeg
-dev.off() #Clears plot panel
-
-#08 Differential gene expression analysis 
-#08.1 Create contrast
-modSv <- cbind(design,svobj.df) #Combines design and latent variation 
-fit <- glmFit(disp, modSv) #Fits the generalized linear model to the variation
-lrt <- glmLRT(fit) #Tests the likelihood ratio of the fit model
-topTags(lrt) #Prints the LRT results
-caseVSctr <- makeContrasts(case-ctr, levels=modSv)
-
-#08.2 Replace gene ids for gene symbols
-if (organism == "Homo sapiens") {
-  #BiocManager::install("org.Hs.eg.db")
-  library(org.Hs.eg.db)
-  genes.map <- select(org.Hs.eg.db, 
-                      as.character(cond_1_1[,1]),c("SYMBOL","ENTREZID"), "ENTREZID")
-} else if (organism == "Mus musculus") {
-  #BiocManager::install("org.Mm.eg.db")
+if (organism == "Mus musculus") {
   library(org.Mm.eg.db)
-  genes.map <- select(org.Mm.eg.db, 
-                      as.character(cond_1_1[,1]),c("SYMBOL","ENTREZID"), "ENTREZID")
+  orgdb <- org.Mm.eg.db
+} else if (organism == "Homo sapiens") {
+  library(org.Hs.eg.db)
+  orgdb <- org.Hs.eg.db
+} else {
+  stop("organism must be either 'Mus musculus' or 'Homo sapiens'")
 }
 
-#08.3 Differential gene expression analysis per se
-lrt.caseVSctr <- glmLRT(fit, contrast=caseVSctr) #Runs differential gene expression analysis
-res.caseVSctr<-topTags(lrt.caseVSctr, n=60000, sort.by = "p.value") #Extracts the top 60k results
+## === Helper functions ===
+load_counts_from_files <- function(files, pattern = NULL) {
+  if (length(files) == 0) stop("No files provided.")
+  mats <- lapply(files, function(f) {
+    df <- read.table(f, sep = "\t", header = TRUE, stringsAsFactors = FALSE, check.names = FALSE)
+    genes <- as.character(df[[1]])
+    counts <- as.numeric(df[[2]])
+    sample_name <- sub(pattern, "", basename(f))
+    list(genes = genes, counts = counts, sample = sample_name)
+  })
+  genes_ref <- mats[[1]]$genes
+  for (m in mats[-1]) {
+    if (!identical(genes_ref, m$genes)) stop("Gene IDs/order mismatch across files.")
+  }
+  mat <- do.call(cbind, lapply(mats, function(m) m$counts))
+  colnames(mat) <- sapply(mats, function(m) m$sample)
+  rownames(mat) <- genes_ref
+  return(mat)
+}
 
-#08.4 Save differential gene expression results
-table.caseVSctr <- as.data.frame(res.caseVSctr$table) #Create new data frame for results
-table.caseVSctr$ENTREZID <- row.names(table.caseVSctr) #Add new column "ENTREZID" to data frame
-table.caseVSctr <- merge(table.caseVSctr,genes.map) #Add gene symbols to data frame
-csvname <- paste0("output/dea_results/",study_name,"_raw.csv") #Set raw file name
-write.csv(table.caseVSctr, file=csvname) #Saves raw results as .csv in the output dea_results directory
-tableB.caseVSctr <- table.caseVSctr[complete.cases(table.caseVSctr$SYMBOL), ] #Remove rows without gene symbol
-if (cutoffmode == "PValue") {
-  tableB.caseVSctr <- tableB.caseVSctr[tableB.caseVSctr$PValue <= 0.05, ]
-} else if (cutoffmode == "FDR") {
-  tableB.caseVSctr <- tableB.caseVSctr[tableB.caseVSctr$FDR <= 0.05, ]
-} #Remove rows according to Pvalue or FDR
-tableC.caseVSctr <- tableB.caseVSctr[tableB.caseVSctr$logFC <= -1|tableB.caseVSctr$logFC >= 1, ] #Save genes using logFC 1 as cut-off
-tableD.caseVSctr <- tableB.caseVSctr[tableB.caseVSctr$logFC <= -1.5|tableB.caseVSctr$logFC >= 1.5, ] #Save genes using logFC 1.5 as cut-off
-tableE.caseVSctr <- tableB.caseVSctr[tableB.caseVSctr$logFC <= -2|tableB.caseVSctr$logFC >= 2, ] #Save genes using logFC 2 as cut-off
-csvnamelog1 <- paste0("output/dea_results/",study_name,"_logFC_1.csv") #Save logFC 1 table name
-csvnamelog15 <- paste0("output/dea_results/",study_name,"_logFC_1_5.csv") #Save logFC 1.5 table name
-csvnamelog2 <- paste0("output/dea_results/",study_name,"_logFC_2.csv") #Save logFC 2 table name
-write.csv(tableC.caseVSctr, file=csvnamelog1) #Saves logFC 1 results as .csv in the output dea_results directory
-write.csv(tableD.caseVSctr, file=csvnamelog15) #Saves logFC 1.5 results as .csv in the output dea_results directory
-write.csv(tableE.caseVSctr, file=csvnamelog2) #Saves logFC 2 results as .csv in the output dea_results directory
+detect_id_type <- function(ids) {
+  if (all(grepl("^[0-9]+$", ids))) return("ENTREZID")
+  if (all(grepl("^ENS", ids))) return("ENSEMBL")
+  return("OTHER")
+}
 
+annotate_results <- function(df, idtype = "ENTREZID", orgdb) {
+  keys <- rownames(df)
+  keytype <- ifelse(idtype == "OTHER", "SYMBOL", idtype)
+  out <- tryCatch(
+    AnnotationDbi::select(orgdb, keys = keys, columns = c("SYMBOL", "ENTREZID", "GENENAME"), keytype = keytype),
+    error = function(e) NULL
+  )
+  if (is.null(out)) return(df)
+  out <- out[!duplicated(out[[keytype]]), ]
+  rownames(out) <- out[[keytype]]
+  ann <- out[rownames(df), c("SYMBOL", "ENTREZID", "GENENAME")]
+  df$SYMBOL <- ann$SYMBOL
+  df$ENTREZID <- ann$ENTREZID
+  df$GENENAME <- ann$GENENAME
+  return(df)
+}
 
+## === Load sample files ===
+cond1_files <- list.files(cond1_dir, pattern = input_pattern, full.names = TRUE)
+cond2_files <- list.files(cond2_dir, pattern = input_pattern, full.names = TRUE)
+all_files <- c(cond1_files, cond2_files)
+
+message("Loading count tables...")
+counts_mat <- load_counts_from_files(all_files, pattern = "\\.tabular$")
+
+group <- factor(c(rep("ctr", length(cond1_files)), rep("case", length(cond2_files))))
+dge <- DGEList(counts = counts_mat, group = group)
+
+## === Filtering lowly expressed genes ===
+keep <- filterByExpr(dge, group = group)
+dge <- dge[keep, , keep.lib.sizes = FALSE]
+message(sprintf("Kept %d genes after filtering.", nrow(dge)))
+
+dge <- calcNormFactors(dge)
+
+## === Load covariates if provided ===
+covariates <- NULL
+if (!is.null(covariates_file) && file.exists(covariates_file)) {
+  covariates <- read.csv(covariates_file, row.names = 1)
+  covariates <- covariates[colnames(dge), , drop = FALSE]
+  message("Loaded covariates: ", paste(colnames(covariates), collapse = ", "))
+}
+
+## === Design matrix ===
+design_base <- model.matrix(~0 + group)
+colnames(design_base) <- levels(group)
+if (!is.null(covariates)) {
+  design <- model.matrix(~ group + ., data = data.frame(group = group, covariates))
+} else {
+  design <- design_base
+}
+
+v <- voom(dge, design = design, plot = FALSE)
+
+## === Optional SVA ===
+mod <- design
+mod0 <- model.matrix(~1, data = as.data.frame(group))
+n.sv_est <- tryCatch(num.sv(v$E, mod, method = "leek"), error = function(e) 0)
+if (n.sv_est > 0) {
+  svobj <- sva(v$E, mod, mod0, n.sv = n.sv_est)
+  design <- cbind(design, svobj$sv)
+  message("Added ", n.sv_est, " surrogate variables to design.")
+}
+
+## === Fit model ===
+contrast.matrix <- makeContrasts(case - ctr, levels = design_base)
+fit <- lmFit(v, design)
+fit2 <- contrasts.fit(fit, contrast.matrix)
+fit2 <- eBayes(fit2)
+
+res <- topTable(fit2, number = Inf, sort.by = "P")
+res$FDR <- p.adjust(res$P.Value, method = "BH")
+idtype <- detect_id_type(rownames(res))
+res_annot <- annotate_results(res, idtype = idtype, orgdb = orgdb)
+
+## === Save only raw results ===
+write.csv(res_annot, file = file.path(outdir, "dea_results", paste0(study_name, "_raw.csv")))
+
+## === QC plots ===
+mds <- plotMDS(dge, plot = FALSE)
+mds.df <- data.frame(MDS1 = mds$x, MDS2 = mds$y, group = group, sample = colnames(dge))
+p <- ggplot(mds.df, aes(x = MDS1, y = MDS2, color = group, label = sample)) +
+  geom_point(size = 3) + geom_text(vjust = -1, size = 3) + theme_bw() +
+  ggtitle(paste0(study_name, " - MDS plot"))
+ggsave(filename = file.path(outdir, "plots", paste0(study_name, "_MDSplot.pdf")), plot = p, width = 6, height = 6)
+
+writeLines(capture.output(sessionInfo()), con = file.path(outdir, paste0(study_name, "_sessionInfo.txt")))
+message("Pipeline finished. Raw results saved to output/dea_results.")
 
