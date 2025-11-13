@@ -48,7 +48,7 @@ load_counts_from_files <- function(files, pattern = NULL) {
     df <- read.table(f, sep = "\t", header = TRUE, stringsAsFactors = FALSE, check.names = FALSE)
     genes <- as.character(df[[1]])
     counts <- as.numeric(df[[2]])
-    sample_name <- sub(pattern, "", basename(f))
+    sample_name <- if (!is.null(pattern)) sub(pattern, "", basename(f)) else basename(f)
     list(genes = genes, counts = counts, sample = sample_name)
   })
   genes_ref <- mats[[1]]$genes
@@ -92,48 +92,78 @@ all_files <- c(cond1_files, cond2_files)
 message("Loading count tables...")
 counts_mat <- load_counts_from_files(all_files, pattern = "\\.tabular$")
 
-group <- factor(c(rep("ctr", length(cond1_files)), rep("case", length(cond2_files))))
+# Ensure group factor levels are stable and in desired order
+group <- factor(c(rep("ctr", length(cond1_files)), rep("case", length(cond2_files))), levels = c("ctr", "case"))
+
 dge <- DGEList(counts = counts_mat, group = group)
 
 ## === Filtering lowly expressed genes ===
 keep <- filterByExpr(dge, group = group)
 dge <- dge[keep, , keep.lib.sizes = FALSE]
-message(sprintf("Kept %d genes after filtering.", nrow(dge)))
+#message(sprintf("Kept %d genes after filtering.", nrow(dge)))
 
 dge <- calcNormFactors(dge)
 
 ## === Load covariates if provided ===
 covariates <- NULL
 if (!is.null(covariates_file) && file.exists(covariates_file)) {
-  covariates <- read.csv(covariates_file, row.names = 1)
+  covariates <- read.csv(covariates_file, row.names = 1, check.names = FALSE)
+  # keep only samples that are present in dge (columns = samples)
   covariates <- covariates[colnames(dge), , drop = FALSE]
   message("Loaded covariates: ", paste(colnames(covariates), collapse = ", "))
 }
 
 ## === Design matrix ===
+# base design (no intercept) with explicit levels
 design_base <- model.matrix(~0 + group)
 colnames(design_base) <- levels(group)
-if (!is.null(covariates)) {
-  design <- model.matrix(~ group + ., data = data.frame(group = group, covariates))
+
+if (!is.null(covariates) && ncol(covariates) > 0) {
+  # ensure covariates are in a data.frame with proper column names
+  df_cov <- as.data.frame(covariates, stringsAsFactors = FALSE)
+  design <- model.matrix(~0 + group + ., data = data.frame(group = group, df_cov))
 } else {
   design <- design_base
 }
 
+# Remove empty / NA column names and make syntactically valid names
+bad_cols <- which(is.na(colnames(design)) | colnames(design) == "" | grepl('^\\s+$', colnames(design)))
+if (length(bad_cols) > 0) {
+  design <- design[, -bad_cols, drop = FALSE]
+}
+colnames(design) <- make.names(colnames(design))
+
+## === voom ===
 v <- voom(dge, design = design, plot = FALSE)
 
 ## === Optional SVA ===
 mod <- design
-mod0 <- model.matrix(~1, data = as.data.frame(group))
+# null model should be intercept only (number of rows = samples)
+mod0 <- model.matrix(~1, data = data.frame(group = group))
+
 n.sv_est <- tryCatch(num.sv(v$E, mod, method = "leek"), error = function(e) 0)
 if (n.sv_est > 0) {
   svobj <- sva(v$E, mod, mod0, n.sv = n.sv_est)
-  design <- cbind(design, svobj$sv)
+  # add surrogate variables with sensible column names
+  sv_mat <- svobj$sv
+  colnames(sv_mat) <- paste0("SV", seq_len(ncol(sv_mat)))
+  design <- cbind(design, sv_mat)
   message("Added ", n.sv_est, " surrogate variables to design.")
 }
 
+# Clean again after adding SVs
+colnames(design) <- make.names(colnames(design))
+
 ## === Fit model ===
-contrast.matrix <- makeContrasts(case - ctr, levels = design_base)
 fit <- lmFit(v, design)
+
+# Ensure contrast uses the cleaned design column names
+# Check that 'case' and 'ctr' are present
+if (!all(c("case", "ctr") %in% colnames(design))) {
+  stop("'case' and 'ctr' columns must be present in the design matrix. Current columns: ", paste(colnames(design), collapse = ", "))
+}
+
+contrast.matrix <- makeContrasts(case - ctr, levels = colnames(design))
 fit2 <- contrasts.fit(fit, contrast.matrix)
 fit2 <- eBayes(fit2)
 
@@ -143,7 +173,7 @@ idtype <- detect_id_type(rownames(res))
 res_annot <- annotate_results(res, idtype = idtype, orgdb = orgdb)
 
 ## === Save only raw results ===
-write.csv(res_annot, file = file.path(outdir, "dea_results", paste0(study_name, "_raw.csv")))
+write.csv(res_annot, file = file.path(outdir, "dea_results", paste0(study_name, "_raw.csv")), row.names = TRUE)
 
 ## === QC plots ===
 mds <- plotMDS(dge, plot = FALSE)
@@ -154,5 +184,5 @@ p <- ggplot(mds.df, aes(x = MDS1, y = MDS2, color = group, label = sample)) +
 ggsave(filename = file.path(outdir, "plots", paste0(study_name, "_MDSplot.pdf")), plot = p, width = 6, height = 6)
 
 writeLines(capture.output(sessionInfo()), con = file.path(outdir, paste0(study_name, "_sessionInfo.txt")))
-message("Pipeline finished. Raw results saved to output/dea_results.")
+message("Pipeline finished. Raw results saved to ", file.path(outdir, "dea_results"))
 
