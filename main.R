@@ -130,9 +130,10 @@ if (n.sv_est > 0) {
   design <- cbind(design, svobj$sv)
   message("Added ", n.sv_est, " surrogate variables to design.")
 }
+colnames(design) <- make.names(colnames(design))
 
 ## === Fit model ===
-contrast.matrix <- makeContrasts(case - ctr, levels = design_base)
+contrast.matrix <- makeContrasts(case - ctr, levels = design)
 fit <- lmFit(v, design)
 fit2 <- contrasts.fit(fit, contrast.matrix)
 fit2 <- eBayes(fit2)
